@@ -10,3 +10,9 @@ libraryDependencies += "com.typesafe.akka" %% "akka-persistence" % "2.5.21"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.0.7" % Test
 // https://mvnrepository.com/artifact/com.typesafe.akka/akka-testkit
 libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.5.21" % Test
+
+resolvers += Resolver.jcenterRepo
+
+// https://mvnrepository.com/artifact/com.github.dnvriend/akka-persistence-inmemory
+libraryDependencies += "com.github.dnvriend" %% "akka-persistence-inmemory" % "2.5.1.1" % Test
+

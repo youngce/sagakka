@@ -3,20 +3,30 @@ package akka.persistence.saga
 import java.util
 import java.util.UUID
 
-import akka.actor.{ActorRef, ActorSelection}
+import akka.actor.{ActorContext, ActorLogging, ActorPath, ActorRef, ActorSelection}
 import akka.persistence.{AtLeastOnceDelivery, PersistentActor}
 
+import scala.collection.immutable.HashMap
+
 object Saga {
+
+  type ReceiveSucceeded = PartialFunction[Succeeded, ActorSelection => Unit]
+  type ReceiveFailed = PartialFunction[Failed, ActorSelection => Unit]
+  type DeliveryId = Long
+  type ReplyTo = ActorPath
+
+  implicit def actorPath2Selection(path: ActorPath)(implicit context: ActorContext) = context.actorSelection(path)
+
+  implicit def actorRef2Path(ref: ActorRef)(implicit context: ActorContext) = ref.path
 
   sealed trait Message {
     val id: UUID
     //    val deliveryId: Long
   }
 
-  sealed trait Command extends Message {
-    val reply: ActorSelection
+  trait Command extends Message {
+    val replyTo: ActorPath
   }
-
 
   trait Event extends Message
 
@@ -31,41 +41,45 @@ object Saga {
 
 }
 
-trait Saga extends PersistentActor with AtLeastOnceDelivery {
+trait Saga extends PersistentActor with AtLeastOnceDelivery with ActorLogging {
 
   import Saga._
 
-  val startedCommands: java.util.HashMap[UUID, (Long, Command)] = new util.HashMap[UUID, (Long, Command)]()
 
-  def startTransaction(to: ActorSelection)(cmd: Command) = {
+  var undoneIds: HashMap[UUID, (DeliveryId, ReplyTo)] = HashMap.empty
 
-
+  def startTransaction(to: ActorSelection, replyTo: ActorPath)(cmd: Command) = {
     deliver(to)(deliveryId => {
-      startedCommands.put(cmd.id, deliveryId -> cmd)
+      undoneIds += cmd.id -> (deliveryId, replyTo)
       cmd
-
     })
   }
 
-  def commit: PartialFunction[Succeeded, Unit]
+  def commit: ReceiveSucceeded
 
-  def rollback: PartialFunction[Failed, Unit]
+  def rollback: ReceiveFailed
 
   override def receive: Receive = super.receive.orElse(commitOrRollback)
 
   private def commitOrRollback: Receive = {
+    case evt: Event if undoneIds.get(evt.id).isEmpty =>
+      log.warning(s"Be not found the transaction id: ${evt.id}, you need to start a transaction first.")
     case s: Succeeded =>
-      commit.apply(s)
-      endTransaction(s)
+      commit.apply(s)(getReplyToOpt(s.id).get)
+      endTransaction(s.id)
     case f: Failed =>
-      rollback.apply(f)
-      endTransaction(f)
+      rollback.apply(f)(getReplyToOpt(f.id).get)
+      endTransaction(f.id)
   }
 
-  private def endTransaction(evt: Event) = {
-
-    val (deliveryId, _) = startedCommands.remove(evt.id)
-    confirmDelivery(deliveryId)
+  def endTransaction(id: UUID) = {
+    getDeliveryIdOpt(id)
+      .map(deliveryId => confirmDelivery(deliveryId))
+    undoneIds -= id
   }
+
+  private def getDeliveryIdOpt(id: UUID) = undoneIds.get(id).map(_._1)
+
+  private def getReplyToOpt(id: UUID) = undoneIds.get(id).map(_._2)
 
 }
