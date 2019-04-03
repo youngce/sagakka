@@ -58,6 +58,7 @@ trait Saga extends PersistentActor with AtLeastOnceDelivery with ActorLogging {
   def commit: ReceiveSucceeded
 
   def rollback: ReceiveFailed
+  def continue: ReceiveFailed
 
   override def receive: Receive = super.receive.orElse(commitOrRollback)
 
